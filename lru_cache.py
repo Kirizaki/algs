@@ -1,80 +1,68 @@
-import threading
 import time
 
+
 class LRUCache:
-    class _Node:
-        def __init__(self, key=None, value=None, ttl=None):
+    class Node:
+        def __init__(self, key, value, ttl):
             self.key = key
             self.value = value
             self.prev = None
             self.next = None
-            self.expires_at = ttl if ttl is None else time.monotonic() + ttl
+            self.expires_at = None if not ttl else time.monotonic() + ttl
 
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self._head = LRUCache._Node()
-        self._tail = LRUCache._Node()
-        self._head.next = self._tail
-        self._tail.prev = self._head
-        self.hashmap = {}
-        self.lock = threading.Lock()
+    def __init__(self, cap):
+        self.cap = cap
+        self.cache_map = {}
+        self.head = LRUCache.Node(-1, -1, None)
+        self.tail = LRUCache.Node(-1, -1, None)
+        self.head.next = self.tail
+        self.tail.prev = self.head
 
     def get(self, key):
-        with self.lock:
-            node = self.hashmap.get(key, None)
+        node = self.cache_map.get(key, -1)
+        if node == -1:
+            return -1
 
-            if node is None:
-                return None
+        if node.expires_at and node.expires_at < time.monotonic():
+            del self.cache_map[key]
+            self.remove(node)
+            return -1
 
-            if self._is_expired(node):
-                del self.hashmap[key]
-                self._delete_at(node)
-                return None
-
-            self._make_mru(node)
-            
-            return node.value
-
-    def _is_expired(self, node):
-        return node.expires_at is not None and time.monotonic() > node.expires_at
-
-    def _make_mru(self, node):
-        self._delete_at(node)
-        self._move_to_mru(node)
-
-    def _delete_at(self, node):
-        # update adjacent
-        node.prev.next = node.next
-        node.next.prev = node.prev
-
-        node.next = None
-        node.prev = None
-
-    def _move_to_mru(self, node):
-        node.next = self._head.next
-        node.prev = self._head
-        self._head.next.prev = node
-        self._head.next = node
+        self.remove(node)
+        self.add(node)
+        return node.value
 
     def put(self, key, value, ttl=None):
-        with self.lock:
-            if key in self.hashmap:  # cache hit
-                node = self.hashmap[key]
-                node.value = value
-                node.expires_at = ttl if ttl is None else time.monotonic() + ttl
-                self._delete_at(node)
-            else:                    # cache miss
-                node = LRUCache._Node(key, value, ttl)
-                self.hashmap[key] = node
+        if self.cap == 0:
+            return
 
-            self._move_to_mru(node)
-            self._evict_if_needed()
+        node = self.cache_map.get(key, None)
+        if node is not None:
+            node.value = value
+            node.expires_at = None if not ttl else time.monotonic() + ttl
+            self.remove(node)
+        else:
+            node = LRUCache.Node(key, value, ttl)
+            self.cache_map[key] = node
 
-    def _evict_if_needed(self):
-        if len(self.hashmap) > self.capacity:
-            self._evict_lru()
+        self.add(node)
+        self.evict_if_needed()
 
-    def _evict_lru(self):
-        del self.hashmap[self._tail.prev.key]
-        self._delete_at(self._tail.prev)
+    def remove(self, node):
+        prev_node = node.prev
+        next_node = node.next
+        prev_node.next = next_node
+        next_node.prev = prev_node
 
+    def add(self, node):
+        temp = self.head.next
+        node.next = temp
+        node.prev = self.head
+        temp.prev = node
+        self.head.next = node
+
+    def evict_if_needed(self):
+        if len(self.cache_map) > self.cap:
+            node = self.tail.prev
+            del self.cache_map[node.key]
+            self.remove(node)
