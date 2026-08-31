@@ -1,4 +1,5 @@
 import time
+import threading
 
 
 class LRUCache:
@@ -17,36 +18,39 @@ class LRUCache:
         self.tail = LRUCache.Node(-1, -1, None)
         self.head.next = self.tail
         self.tail.prev = self.head
+        self.lock = threading.Lock()
 
     def get(self, key):
-        node = self.cache_map.get(key, -1)
-        if node == -1:
-            return -1
+        with self.lock:
+            node = self.cache_map.get(key, -1)
+            if node == -1:
+                return -1
 
-        if node.expires_at and node.expires_at < time.monotonic():
-            del self.cache_map[key]
+            if node.expires_at and node.expires_at < time.monotonic():
+                del self.cache_map[key]
+                self.remove(node)
+                return -1
+
             self.remove(node)
-            return -1
-
-        self.remove(node)
-        self.add(node)
-        return node.value
+            self.add(node)
+            return node.value
 
     def put(self, key, value, ttl=None):
-        if self.cap == 0:
-            return
+        with self.lock:
+            if self.cap == 0:
+                return
 
-        node = self.cache_map.get(key, None)
-        if node is not None:
-            node.value = value
-            node.expires_at = None if not ttl else time.monotonic() + ttl
-            self.remove(node)
-        else:
-            node = LRUCache.Node(key, value, ttl)
-            self.cache_map[key] = node
+            node = self.cache_map.get(key, None)
+            if node is not None:
+                node.value = value
+                node.expires_at = None if not ttl else time.monotonic() + ttl
+                self.remove(node)
+            else:
+                node = LRUCache.Node(key, value, ttl)
+                self.cache_map[key] = node
 
-        self.add(node)
-        self.evict_if_needed()
+            self.add(node)
+            self.evict_if_needed()
 
     def remove(self, node):
         prev_node = node.prev
